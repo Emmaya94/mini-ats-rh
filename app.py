@@ -1,11 +1,57 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import re
+import pdfplumber
+from docx import Document
 
 # Connexion à la base de données SQLite
 conn = sqlite3.connect("ats_database.db")
 cursor = conn.cursor()
+def extraire_texte_pdf(fichier):
+    texte = ""
+    with pdfplumber.open(fichier) as pdf:
+        for page in pdf.pages:
+            texte += page.extract_text() or ""
+    return texte
 
+
+def extraire_texte_docx(fichier):
+    doc = Document(fichier)
+    return "\n".join([p.text for p in doc.paragraphs])
+
+
+def extraire_infos_cv(texte):
+    infos = {
+        "nom": "",
+        "email": "",
+        "telephone": "",
+        "competences": ""
+    }
+
+    email = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", texte)
+    telephone = re.search(r"(\+33|0)[1-9](\s?\d{2}){4}", texte)
+
+    if email:
+        infos["email"] = email.group()
+
+    if telephone:
+        infos["telephone"] = telephone.group()
+
+    mots_cles = [
+        "Python", "Excel", "SIRH", "Paie", "RH", "SQL",
+        "Power BI", "ADP", "Workday", "SAP", "SuccessFactors",
+        "Recruitment", "Recrutement", "Administration du personnel"
+    ]
+
+    competences_trouvees = [
+        mot for mot in mots_cles if mot.lower() in texte.lower()
+    ]
+
+    infos["competences"] = ", ".join(competences_trouvees)
+
+    return infos
+    
 # Création de la table candidats si elle n'existe pas
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS candidats (
@@ -84,11 +130,32 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.header("Ajouter un candidat")
 
-    nom = st.text_input("Nom")
-    email = st.text_input("Email")
+cv_file = st.file_uploader("Importer un CV", type=["pdf", "docx"])
+
+infos_cv = {
+    "nom": "",
+    "email": "",
+    "telephone": "",
+    "competences": ""
+}
+
+if cv_file:
+    if cv_file.name.endswith(".pdf"):
+        texte_cv = extraire_texte_pdf(cv_file)
+    elif cv_file.name.endswith(".docx"):
+        texte_cv = extraire_texte_docx(cv_file)
+    else:
+        texte_cv = ""
+
+    infos_cv = extraire_infos_cv(texte_cv)
+
+    st.success("CV analysé. Formulaire pré-rempli.")
+    
+    nom = st.text_input("Nom", value=infos_cv["nom"])
+    email = st.text_input("Email", value=infos_cv["email"])
     poste = st.text_input("Poste")
     experience = st.number_input("Expérience (années)", 0, 50)
-    competences = st.text_input("Compétences")
+    competences = st.text_input("Compétences", value=infos_cv["competences"])
     salaire = st.number_input("Salaire souhaité")
     disponibilite = st.selectbox("Disponibilité", ["Immédiate", "1 mois", "3 mois"])
 
